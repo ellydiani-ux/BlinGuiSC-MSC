@@ -1,0 +1,267 @@
+// Implementacion de KNN en Atmega2560 //
+// adaptation of Autor: Jose Ruben Sanchez Lopez     //
+
+//knn...........
+#include "KnnClassification.h"
+#include "Dataset.h"
+
+//accelerometer..........
+#include<Wire.h>
+#include "AccelerometerSensor.h"//(5v)
+#define col_acc 2 // collunm de la base de datos
+#define lin_acc 120  // numero de caracteristicas
+
+#define col_gyr 2 // collunm de la base de datos
+#define lin_gyr 120  // numero de caracteristicas
+
+AccelerometerSensor a; 
+double data_acc[col_acc]; // dato a clasificar
+double data_gyr[col_gyr]; // dato a clasificar
+
+#define col_at 5  // numero de caracteristicas
+double data_at[col_at];
+
+//ultrasonic.............
+#include "UltrasonicSensor.h"
+#define lin_ul_up 120
+#define col_ul_up 1
+#define lin_ul_up_aux 120
+#define col_ul_up_aux 1
+#define lin_ul_dow 120
+#define col_ul_dow 1
+#define lin_ul_dow_one 120
+#define col_ul_dow_one 1
+
+UltrasonicSensor u;
+double data_ul_up[col_ul_up]; // dados para classificar
+double data_ul_dow[col_ul_dow]; // dados para classificar
+double data_ul_dow_one[col_ul_dow_one]; // dados para classificar
+
+long actual = 0, previo = 0;
+  int readn=0;
+//notificatio........
+#include "Notifications.h"
+Notifications n;
+//sound sensr.............
+#include "SoundSens.h"
+SoundSens s;
+#define lin_snd 100 // line de la base de datos
+#define col_snd 2  // numero de caracteristicas]
+double data_snd[col_snd];
+
+
+int timecurrent = 0;
+   int timeprevious= 0;
+  
+//-----------------------------------------------------------------------
+// Impresion de confirmacion
+//-----------------------------------------------------------------------
+/*
+void imprime(double data[], int clase){
+  
+  Serial.println("-----------------------------------------------");
+  Serial.print(nomAtr_acc[0]); Serial.print(": "); Serial.print(data[0],2); Serial.println(" cms");
+  Serial.print(nomAtr_acc[1]); Serial.print(": "); Serial.print(data[1],2); Serial.println(" cms");
+  Serial.print(nomAtr_acc[2]); Serial.print(": "); Serial.print(data[2],2); Serial.println(" cms");
+  Serial.print(" >> Clase: "); Serial.println(classAcc[clase]);
+  
+}*/
+
+//classifier accelerometer
+boolean classifAccelerometer(){
+      a.meanAcelerometro();
+      a.diff_ax;
+      a.diff_ay;
+      a.diff_az;
+      a.diff_gx;
+      a.diff_gy;     
+      a.diff_gz;
+      data_acc[0]= a.diff_ax;
+      data_acc[1]= a.diff_ay;
+      
+     data_gyr[0]= a.diff_ax;
+      data_acc[1]= a.diff_ay;
+      
+            // tic
+      previo = millis();    
+      // encontrar la clase
+        if (a.diff_ax > 500 || a.diff_ay > 500 || a.diff_gy > 500 || a.diff_gz > 500) {
+          int acc = clasificaKNN((double**)atr_acc, classAcc, data_acc, 20, lin_acc, col_acc);
+           int gyr = clasificaKNN((double**)atr_gyr, classGyr, data_gyr, 20, lin_gyr, col_gyr);
+      
+          Serial.print("acc: ");
+         Serial.print(acc);
+         Serial.print(" | gyr: ");
+         Serial.println(gyr);
+            
+      if((acc ==1) || (gyr==1)){
+        Serial.println("********** *WALK* **********");   
+        return true;
+       }
+         return false;     
+        }
+       
+     else{ 
+       Serial.println("********** *STOP* **************");
+            return false;
+      }
+         
+      // tac
+      actual = millis(); 
+     // imprimir
+     // imprime(data_acc, acc);
+    //  Serial.print("Tiempo: "); Serial.print(actual-previo); Serial.println(" mS");
+            return false;
+}
+
+//classifier ultrasonic
+
+boolean classificObstSuspend(){
+     data_ul_up[0]=u.upSensor;
+     data_ul_up[1]=u.upSensor_aux;
+     Serial.print("up:");
+     Serial.println(u.upSensor);
+     Serial.print("up_Aux:");
+     Serial.println(u.upSensor_aux);
+  
+    if (((u.upSensor > 20) &&(u.upSensor< 200)) & ((u.upSensor_aux > 20) &&(u.upSensor_aux< 200))){
+          if ((u.upSensor_aux < u.frontSensor +10) || (u.upSensor < u.frontSensor +10) || (u.upSensor_aux < u.dowSensor+10)||(u.upSensor < u.dowSensor+10)){
+
+    
+    //classifica obstáculo suspenso ou nao[0,1]    
+     int susp = clasificaKNN((double**)atr_ul_up, class_ul_up, data_ul_up, 20, lin_ul_up, col_ul_up);
+      Serial.print("Suspenso*************************:");
+      Serial.println(susp);
+             if (susp == 0){
+                  return true;   
+               }
+           }
+}
+
+}
+
+boolean classificObstRast(){
+     u.sonarDistPerDirection();
+     data_ul_dow[0]=u.frontSensor;
+     
+     data_ul_dow_one[0]=u.dowSensor;
+     
+     Serial.print("Frontt:");
+     Serial.println(u.frontSensor);
+     Serial.print("dow:");
+     Serial.println(u.dowSensor);
+     
+     
+   if (((u.frontSensor > 20) && (u.frontSensor < 200)) & ((u.dowSensor > 20) && (u.dowSensor < 200))) { 
+     if ((u.frontSensor < u.upSensor_aux +10) || (u.frontSensor < u.upSensor +10) || (u.dowSensor <u.upSensor_aux + 10)||(u.dowSensor <u.upSensor+10)){
+     //classifica obstáculo rasteiro ou nao[0,1]
+     int rast = clasificaKNN((double**)atr_ul_dow, class_ul_dow, data_ul_dow, 20, lin_ul_dow, col_ul_dow);
+     Serial.print("Rasteiro:*********************");
+     Serial.println(rast);
+    
+     //classifica obstáculo rasteiro ou nao[0,1]
+     int rast_one = clasificaKNN((double**)atr_ul_dow_one, class_ul_dow_one, data_ul_dow_one, 20, lin_ul_dow_one, col_ul_dow_one);
+     Serial.print("Rasteiro um********************:");
+     Serial.println(rast_one);
+        if ((rast == 0 )|| (rast_one == 0)){ 
+                  return true;
+          } 
+       }
+
+   }
+   
+}
+
+void ObstacleDetection(){
+                 
+        if ((classificObstRast()==true)){ 
+                  n.alertObstacleRast();  
+            } 
+   
+  
+        if ((classificObstSuspend() == true)){
+               n.alertObstacleSusp();
+            }
+                
+        }
+   
+         
+             
+ 
+     
+     
+int sound(){
+     s.noiseSound();
+     data_snd[0]=s.diff;
+     data_snd[1]=s.meand;
+     int snd = clasificaKNN((double**)atr_snd, classSnd, data_snd, 20, lin_snd, col_snd);
+     Serial.print("classsifica::");
+     Serial.println(snd);
+    return snd;
+}  
+     
+ boolean Activity(){
+     a.meanAcelerometro();
+      a.diff_ax;
+      a.diff_ay;
+      a.diff_az;
+      a.diff_gx;
+      a.diff_gy;     
+      a.diff_gz;
+     Serial.print("diff_ax");
+     Serial.println(a.diff_ax);
+     Serial.print("diff_ay");
+     Serial.println(a.diff_ay);
+     Serial.print("diff_az");
+     Serial.println(a.diff_az);
+     Serial.print("diff_gx");
+     Serial.println(a.diff_gx);
+     Serial.print("diff_gy");
+     Serial.println(a.diff_gy);
+     Serial.print("diff_gz");
+     Serial.println(a.diff_gz);
+      
+      
+    //  if (a.diff_ax > 1500 || a.diff_ay > 2000 || a.diff_gy > 1500 || a.diff_gz > 1000) {
+     if(classifAccelerometer() ==true){   
+      Serial.println("********** *WALK* **********");
+        return true;
+       }
+       
+     else{ 
+       Serial.println("********** *STOP* **************");
+            return false;
+      }
+      
+     }
+
+
+//-----------------------------------------------------------------------
+// Configuracion del microcontrolador
+//-----------------------------------------------------------------------
+
+
+void setup() {
+    Serial.begin(9600);
+   a.pinAccelerometer();
+   u.pinSonar();
+   s.pinSound();
+   n.pinNotification();
+  Serial.begin(9600);
+
+}
+
+
+
+
+//-----------------------------------------------------------------------
+// Programa principal
+//-----------------------------------------------------------------------
+void loop() {    
+ if (n.notificOff()==true){
+  if (classifAccelerometer()==true){
+    n.lightActivity();
+  ObstacleDetection();
+ }
+}
+}

@@ -1,0 +1,499 @@
+
+/*SD card - pinos predefinidos pelo arduino menos o CS pode ser qualquer um
+UNO:
+SCK - pin 13
+MISO - pin 12
+MOSI - pin 11
+CS - pin 4
+Mega:
+SCK - pin 52
+MISO - pin 50
+MOSI - pin 51
+CS - pin 53 chipselect
+
+*/
+
+
+#define trigPin1 3 //front /righ
+#define echoPin1 2 //front /righ
+#define trigPin2 6 //dow / left
+#define echoPin2 5 //dow /left
+#define trigPin3 7 //up / front
+#define echoPin3 8 //up / front
+
+#include<Wire.h>
+const int MPU_addr=0x68;  // I2C address of the MPU-6050
+int buffersize=1000;     //Amount of readings used to average, make it higher to get more precision but sketch will be slower  (default:1000)
+
+int16_t ax, ay, az,gx, gy, gz;
+int mean_ax,mean_ay,mean_az,mean_gx,mean_gy,mean_gz,state=0;
+int ax_offset,ay_offset,az_offset;
+int acel_deadzone=8;
+
+int lastRead = 0;
+int currentRead;
+int diff=0;
+#include <SD.h>
+File dataFile;
+const int chipSelect = 53;
+int countUlt = 0;
+
+double duration, distance, frontSensor, dowSensor, upSensor,lastDistFront, currentDistFront,variatDist, variatTime;
+double mean_front,mean_dow,mean_up, mean_speed, mean_dist, mean_time;
+double buff_front=0,buff_dow=0,buff_up=0, buff_speed=0, buff_variat_dist=0, buff_variat_time=0;
+
+double lastTime=0;
+double currentTime=0;
+double speeds=0;
+
+void setup()
+{
+   pinMode(trigPin1, OUTPUT);
+   pinMode(echoPin1, INPUT);
+   pinMode(trigPin2, OUTPUT);
+   pinMode(echoPin2, INPUT);
+   pinMode(trigPin3, OUTPUT);
+   pinMode(echoPin3, INPUT);
+
+  pinMode(53, OUTPUT);
+  Wire.begin();
+  Wire.beginTransmission(MPU_addr);
+  Wire.write(0x6B);  // PWR_MGMT_1 register
+  Wire.write(0);     // set to zero (wakes up the MPU-6050)
+  Wire.endTransmission(true);
+  Serial.begin(9600);
+  
+  Serial.print("Initializing SD card...");
+   // see if the card is present and can be initialized:
+  if (!SD.begin(chipSelect)) {
+    Serial.println("Card failed, or not present");
+    // don't do anything more:
+    return;
+  }
+  Serial.println("card initialized.");
+}
+
+void loop() {
+sonarDistancesObstacles();
+sonarDistancesObstaclesMean();
+
+//sonarSpeed();
+//sonarMeanSpeed();
+//meansensorAccel();
+// Serial.print(mean_ax); 
+//    Serial.print("\t");
+//    Serial.print(mean_ay); 
+//    Serial.print("\t");
+//    Serial.print(mean_az); 
+//    Serial.print("\t");
+//    Serial.print(mean_gx); 
+//    Serial.print("\t");
+//    Serial.print(mean_gy); 
+//    Serial.print("\t");
+//    Serial.println(mean_gz);
+}
+
+  
+ void sonarDistancesObstacles(){
+
+   frontSensor = sonarCalcDistance(trigPin1, echoPin1);    
+   dowSensor = sonarCalcDistance(trigPin2, echoPin2);
+   upSensor = sonarCalcDistance(trigPin3, echoPin3);
+ /*  
+    Serial.print("DistFront");
+    Serial.println(frontSensor);
+    
+   Serial.print("DistDow");
+   Serial.println(dowSensor);
+   
+ Serial.print("DistSensor");
+  Serial.println(upSensor);*/
+       
+      
+    dataFile = SD.open("calibaer.csv", FILE_WRITE);
+   if (dataFile) {       
+       Serial.print("DistFront");
+       Serial.println(frontSensor);
+       
+       dataFile.print(", DistFront, ");
+       dataFile.print(frontSensor);
+      
+       Serial.print("DistDow");
+       Serial.println(dowSensor);
+       
+       dataFile.print(", DistDow, ");
+       dataFile.print(dowSensor);
+       
+       Serial.print("DistUp");
+       Serial.println(upSensor);
+       
+       dataFile.print(", DistUp, ");
+       dataFile.println(upSensor); 
+       // close the file:
+       dataFile.flush();
+       dataFile.close();    
+       }
+      else {
+      // if the file didn't open, print an error:
+     // Serial.println("error opening dataUob.csv");
+      }
+    
+  }
+
+
+void sonarDistancesObstaclesMean(){
+      countUlt++;
+
+   frontSensor = sonarCalcDistance(trigPin1, echoPin1);    
+   dowSensor = sonarCalcDistance(trigPin2, echoPin2);
+   upSensor = sonarCalcDistance(trigPin3, echoPin3);
+ 
+ if (countUlt <= 20){
+   
+ buff_front = buff_front + frontSensor;
+ buff_dow = buff_dow + dowSensor;
+ buff_up = buff_up + upSensor;
+
+ }
+ 
+ if (countUlt == 20){
+    mean_front = buff_front/countUlt;  
+    mean_dow = buff_dow/countUlt;  
+    mean_up = buff_up/countUlt;  
+
+  dataFile = SD.open("calibra.csv", FILE_WRITE); 
+ 
+   if (dataFile) {
+       
+       
+       dataFile.print(", DistFrontMean, ");
+       dataFile.print(frontSensor);
+      
+       dataFile.print(", DistDowMean, ");
+       dataFile.print(dowSensor);
+       
+       dataFile.print(", DistUpMean, ");
+       dataFile.println(upSensor);
+       
+   //   dataFile.println(",ObstDistMax120cm");
+
+     // dataFile.println(",ObstDistMin60cm ");
+       // close the file:
+      dataFile.flush();
+      dataFile.close();    
+       }
+      else {
+      // if the file didn't open, print an error:
+      Serial.println("error opening dataUobM.csv");
+      }
+    buff_front = 0;  
+    buff_dow = 0;  
+    buff_up = 0;  
+    countUlt=0;
+    }
+    
+  }
+
+
+double sonarCalcDistance(int trigPin,int echoPin){
+          digitalWrite(trigPin, LOW);
+          delayMicroseconds(1);
+          digitalWrite(trigPin, HIGH);
+          delayMicroseconds(1);
+          digitalWrite(trigPin, LOW);
+          duration = pulseIn(echoPin, HIGH);
+          distance = duration /29.4 / 2 ; 
+        //  Serial.println(distance);
+          return distance;
+          }
+          
+          
+  void sonarMeanSpeed(){
+      countUlt++;
+
+   lastDistFront = sonarCalcDistance(trigPin1, echoPin1);
+   lastTime = millis();
+   currentDistFront = sonarCalcDistance(trigPin1, echoPin1);
+   currentTime = millis();
+
+   variatDist = abs(lastDistFront - currentDistFront); 
+   variatTime = abs(currentTime-lastTime);
+   
+   speeds = (variatDist)/ (variatTime);  
+     
+   dowSensor = sonarCalcDistance(trigPin2, echoPin2);
+   upSensor = sonarCalcDistance(trigPin3, echoPin3);
+Serial.print("lastDistFront: ");        
+Serial.print(lastDistFront);   
+Serial.print("currentDistFront: ");        
+Serial.print(currentDistFront);  
+Serial.print("variatDist: "); 
+Serial.print(variatDist);   
+
+Serial.print("speeds: "); 
+Serial.println(speeds);   
+
+Serial.print("count1: "); 
+Serial.println(countUlt);   
+    
+ if (countUlt <= 30){
+ buff_front = buff_front + currentDistFront;
+ buff_dow = buff_dow + dowSensor;
+ buff_up = buff_up + upSensor;
+ buff_speed= buff_speed+speeds;
+ buff_variat_dist=buff_variat_dist+variatDist;
+ buff_variat_time=buff_variat_time+variatTime;
+Serial.print("buff_front: "); 
+Serial.println(buff_front);   
+
+Serial.print("count2: "); 
+Serial.println(countUlt); 
+
+Serial.print("buff_speed: "); 
+Serial.println(buff_speed);   
+
+ }
+ 
+  if (countUlt == 30){
+Serial.print("count3: "); 
+Serial.println(countUlt);   
+
+    mean_front = buff_front/countUlt;  
+    mean_dow = buff_dow/countUlt;  
+    mean_up = buff_up/countUlt;  
+    mean_speed = buff_speed/countUlt; 
+    mean_dist = buff_variat_dist/countUlt; 
+    mean_time = buff_variat_time/countUlt; 
+    Serial.print("mean_front: "); 
+    Serial.println(mean_front);   
+   Serial.print("mean_speed: "); 
+   Serial.println(mean_speed);   
+
+        
+//dataFile = SD.open("felsp.csv", FILE_WRITE);
+   //dataFile = SD.open("thiasp.csv", FILE_WRITE);
+   //dataFile = SD.open("ailtsp.csv", FILE_WRITE);
+   //dataFile = SD.open("clarasp.csv", FILE_WRITE);
+   dataFile = SD.open("anasp.csv", FILE_WRITE);
+   //dataFile = SD.open("rebecasp.csv", FILE_WRITE);
+   //dataFile = SD.open("lucasp.csv", FILE_WRITE);
+   //dataFile = SD.open("albertsp.csv", FILE_WRITE);
+   //dataFile = SD.open("andresp.csv", FILE_WRITE);
+   //dataFile = SD.open("campisp.csv", FILE_WRITE);
+   //dataFile = SD.open("thiagsp.csv", FILE_WRITE);
+   //dataFile = SD.open("tamirsp.csv", FILE_WRITE);
+  // dataFile = SD.open("danisp.csv", FILE_WRITE);
+//   dataFile = SD.open("igorsp.csv", FILE_WRITE);
+   if (dataFile) {
+       
+       dataFile.print("speedsMean:,");
+       dataFile.print(mean_speed);
+        
+       dataFile.print(", variatDistMean, ");
+       dataFile.print(mean_dist);
+      
+       dataFile.print(", variatTimeMean, ");
+       dataFile.print(mean_time);
+            
+       dataFile.print(", DistFrontMean, ");
+       dataFile.print(mean_front);
+      
+       dataFile.print(", DistDowMean, ");
+       dataFile.print(mean_dow);
+       
+       dataFile.print(", DistUpMean, ");
+       dataFile.print(mean_up);
+       
+       dataFile.println(",stop");
+       // close the file:
+      dataFile.flush();
+      dataFile.close();    
+       }
+      else {
+      // if the file didn't open, print an error:
+      Serial.println("error opening dataUM.csv");
+    }
+    buff_front = 0;  
+    buff_dow = 0;  
+    buff_up = 0;  
+    buff_speed = 0; 
+    buff_variat_dist = 0; 
+    buff_variat_time = 0; 
+    countUlt=0;  
+}
+Serial.print("count4: "); 
+Serial.println(countUlt);   
+
+
+     
+  }
+  
+  
+  
+ void sonarSpeed(){
+
+   lastDistFront = sonarCalcDistance(trigPin1, echoPin1);
+   lastTime = millis();
+   currentDistFront = sonarCalcDistance(trigPin1, echoPin1);
+   currentTime = millis();
+
+   variatDist = abs(lastDistFront - currentDistFront); 
+   variatTime = abs(currentTime-lastTime);
+   
+   speeds = (variatDist)/ (variatTime);  
+     
+   dowSensor = sonarCalcDistance(trigPin2, echoPin2);
+   upSensor = sonarCalcDistance(trigPin3, echoPin3);
+
+Serial.print("lastDistFront: ");        
+Serial.print(lastDistFront);   
+Serial.print("currentDistFront: ");        
+Serial.print(currentDistFront);  
+Serial.print("variatDist: "); 
+Serial.print(variatDist);   
+
+Serial.print("speeds: "); 
+Serial.println(speeds);   
+//  dataFile = SD.open("felsp.csv", FILE_WRITE);
+   //dataFile = SD.open("thiasp.csv", FILE_WRITE);
+   //dataFile = SD.open("ailtsp.csv", FILE_WRITE);
+   //dataFile = SD.open("clarasp.csv", FILE_WRITE);
+   dataFile = SD.open("anasp.csv", FILE_WRITE);
+   //dataFile = SD.open("rebecasp.csv", FILE_WRITE);
+   //dataFile = SD.open("lucasp.csv", FILE_WRITE);
+   //dataFile = SD.open("albertsp.csv", FILE_WRITE);
+   //dataFile = SD.open("andresp.csv", FILE_WRITE);
+   //dataFile = SD.open("campisp.csv", FILE_WRITE);
+   //dataFile = SD.open("thiagsp.csv", FILE_WRITE);
+   //dataFile = SD.open("tamirsp.csv", FILE_WRITE);
+  // dataFile = SD.open("danisp.csv", FILE_WRITE);
+//   dataFile = SD.open("igorsp.csv", FILE_WRITE);
+
+   if (dataFile) {
+       
+       dataFile.print("speeds:,");
+       dataFile.print(speeds);
+        
+       dataFile.print(", variatDist, ");
+       dataFile.print(variatDist);
+      
+       dataFile.print(", variatTime, ");
+       dataFile.print(variatTime);
+            
+       dataFile.print(", DistFront, ");
+       dataFile.print(currentDistFront);
+      
+       dataFile.print(", DistDow, ");
+       dataFile.print(dowSensor);
+       
+       dataFile.print(", DistUp, ");
+       dataFile.print(upSensor);
+       
+       dataFile.println(",stop");
+       // close the file:
+      dataFile.flush();
+      dataFile.close();    
+       }
+      else {
+      // if the file didn't open, print an error:
+      Serial.println("error opening dataU.csv");
+      }
+    
+  }
+  
+          
+void meansensorAccel(){
+  long i=0,buff_ax=0,buff_ay=0,buff_az=0,buff_gx=0,buff_gy=0,buff_gz=0;
+
+  while (i<(buffersize+101)){
+    // read raw accel/gyro measurements from device
+ Wire.beginTransmission(MPU_addr);
+ Wire.write(0x3B);  // starting with register 0x3B (ACCEL_XOUT_H)
+ Wire.endTransmission(false);
+ Wire.requestFrom(MPU_addr,14,true);  // request a total of 14 registers
+ ax=Wire.read()<<8|Wire.read();  // 0x3B (ACCEL_XOUT_H) & 0x3C (ACCEL_XOUT_L)  
+ ay=Wire.read()<<8|Wire.read();  // 0x3D (ACCEL_YOUT_H) & 0x3E (ACCEL_YOUT_L)
+ az=Wire.read()<<8|Wire.read();  // 0x3F (ACCEL_ZOUT_H) & 0x40 (ACCEL_ZOUT_L)
+ 
+ gx=Wire.read()<<8|Wire.read();  // 0x43 (GYRO_XOUT_H) & 0x44 (GYRO_XOUT_L)
+ gy=Wire.read()<<8|Wire.read();  // 0x45 (GYRO_YOUT_H) & 0x46 (GYRO_YOUT_L)
+ gz=Wire.read()<<8|Wire.read();  // 0x47 (GYRO_ZOUT_H) & 0x48 (GYRO_ZOUT_L)
+     
+    if (i>100 && i<=(buffersize+100)){ //First 100 measures are discarded
+      buff_ax=buff_ax+ax;
+      buff_ay=buff_ay+ay;
+      buff_az=buff_az+az;
+      
+      buff_gx=buff_gx+gx;
+      buff_gy=buff_gy+gy;
+      buff_gz=buff_gz+gz;
+    }
+    if (i==(buffersize+100)){
+      int ready=0;
+      
+      mean_ax=buff_ax/buffersize;
+      mean_ay=buff_ay/buffersize;
+      mean_az=buff_az/buffersize;
+      
+      mean_gx=buff_gx/buffersize;
+      mean_gy=buff_gy/buffersize;
+      mean_gz=buff_gz/buffersize;
+      
+      ax_offset=-mean_ax/8;
+      ay_offset=-mean_ay/8;
+      az_offset=(16384-mean_az)/8;
+    
+     if (abs(mean_ay)<=acel_deadzone) ready++;
+    else ay_offset=ay_offset-mean_ay/acel_deadzone;
+
+    if (abs(16384-mean_az)<=acel_deadzone) ready++;
+    else az_offset=az_offset+(16384-mean_az)/acel_deadzone;
+    
+    if (abs(mean_ax)<=acel_deadzone){
+           Serial.print("\t entrou:");
+           ready++;}
+    else {
+     ax_offset=ax_offset-mean_ax/acel_deadzone;
+     currentRead = ax_offset;
+    Serial.print("\t x1:");
+    Serial.print(ax_offset);
+        diff= abs(currentRead - lastRead);
+    }
+    lastRead = currentRead;
+   
+   // Serial.print("Diferenca:");
+   // Serial.println(diff);
+      
+   dataFile = SD.open("dataAc.csv", FILE_WRITE);
+
+   if (dataFile) {
+       dataFile.print("x|y|z:,{");
+       dataFile.print(ax_offset);
+       
+       //dataFile.print(",diffAcX:,");
+       //dataFile.print(diff);
+       
+       dataFile.print("; ");
+       dataFile.print(ay_offset);
+
+       dataFile.print("; ");
+       dataFile.print(az_offset);
+       
+       dataFile.println("},stop/move/seat");
+       // close the file:
+      dataFile.flush();
+      dataFile.close();    
+       }
+      else {
+      // if the file didn't open, print an error:
+      Serial.println("error opening dataAcc.csv");
+    }
+       
+    if (ready==3) break;
+    }
+    i++;
+  }
+}
+
+
+
